@@ -1,6 +1,8 @@
+require('dotenv').config()
 const express = require('express')
 const passport = require('passport');
 const Strategy = require('passport-github').Strategy;
+const cors = require('cors')
 const db = require('./config/db.js')
 const app = express()
 const port = 4000
@@ -17,15 +19,10 @@ passport.use(
     {
       clientID: process.env["GITHUB_CLIENT_ID"],
       clientSecret: process.env["GITHUB_CLIENT_SECRET"],
-      callbackURL: "/return",
+      callbackURL: process.env["BASE_URL"] ? `${process.env["BASE_URL"]}/return` : "/return",
     },
     function (accessToken, refreshToken, profile, cb) {
       console.log("accessToken", accessToken);
-      // In this example, the user's GitHub profile is supplied as the user
-      // record.  In a production-quality application, the GitHub profile should
-      // be associated with a user record in the application's database, which
-      // allows for account linking and authentication with other identity
-      // providers.
       return cb(null, profile);
     }
   )
@@ -57,11 +54,20 @@ app.set("view engine", "ejs");
 app.use(require("morgan")("combined"));
 app.use(require("cookie-parser")());
 app.use(require("body-parser").urlencoded({ extended: true }));
+app.use(require('body-parser').json())
+app.use(cors({
+  origin: process.env.CLIENT_ORIGIN || 'http://localhost:3000',
+  credentials: true
+}))
 app.use(
   require("express-session")({
-    secret: "keyboard cat",
+    secret: process.env["SESSION_SECRET"] || "keyboard cat",
     resave: true,
     saveUninitialized: true,
+    cookie: {
+      sameSite: 'lax',
+      secure: false
+    }
   })
 );
 
@@ -85,7 +91,7 @@ app.get(
   "/return",
   passport.authenticate("github", { failureRedirect: "/login" }),
   function (_req, res) {
-    res.redirect("/");
+    res.redirect(process.env.CLIENT_ORIGIN || "http://localhost:3000");
   }
 );
 
@@ -102,9 +108,17 @@ app.get("/logout", function (req, res, next) {
     if (err) {
       return next(err);
     }
-    res.redirect("/");
+    res.redirect(process.env.CLIENT_ORIGIN || "http://localhost:3000");
   });
 });
+
+// API: logout without redirect
+app.post('/api/logout', (req, res, next) => {
+  req.logout(function (err) {
+    if (err) { return next(err) }
+    res.json({ ok: true })
+  })
+})
 
 //http://localhost:4000/users
 app.get('/users', (req, res) => { 
@@ -112,6 +126,46 @@ app.get('/users', (req, res) => {
     db.query('select * from people', (err,data) => {
         res.send(data) //클라이언트 에게 응답
     })
+})
+
+// API: Get current authenticated user
+app.get('/api/me', (req, res) => {
+  res.json({ user: req.user || null })
+})
+
+// API: Example time slots
+app.get('/api/slots', (_req, res) => {
+  const slots = [
+    { start: '10:00', end: '11:00', status: 'past' },
+    { start: '11:00', end: '12:00', status: 'past' },
+    { start: '12:00', end: '13:00', status: 'past' },
+    { start: '13:00', end: '14:00', status: 'available' },
+    { start: '14:00', end: '15:00', status: 'available' },
+    { start: '15:00', end: '16:00', status: 'available' },
+    { start: '16:00', end: '17:00', status: 'available' },
+    { start: '17:00', end: '18:00', status: 'available' },
+    { start: '18:00', end: '19:00', status: 'available' },
+    { start: '19:00', end: '20:00', status: 'available' },
+    { start: '20:00', end: '21:00', status: 'available' },
+    { start: '21:00', end: '22:00', status: 'available' },
+    { start: '22:00', end: '23:00', status: 'available' },
+    { start: '23:00', end: '00:00', status: 'available' },
+    { start: '00:00', end: '01:00', status: 'available' },
+    { start: '01:00', end: '02:00', status: 'reserved', reservedBy: '한진우' },
+    { start: '02:00', end: '03:00', status: 'available' },
+    { start: '03:00', end: '04:00', status: 'available' },
+  ]
+  res.json({ slots })
+})
+
+// API: Reserve a slot (requires login)
+app.post('/api/reserve', require('connect-ensure-login').ensureLoggedIn(), (req, res) => {
+  const { start, end } = req.body || {}
+  if (!start || !end) {
+    return res.status(400).json({ error: 'start and end are required' })
+  }
+  // TODO: persist to DB; for now, just echo back
+  res.json({ ok: true, reserved: { start, end, by: req.user?.username || 'me' } })
 })
 
 app.listen(process.env["PORT"] || port);
