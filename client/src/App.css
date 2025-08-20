@@ -1,11 +1,4 @@
+/* Tailwind handles most styling. Keep this file minimal. */
 .App{
-  width: 1200px;
-  height: 700px;
-  background-color: aqua;
-  margin: 0 auto;
-}
-
-.App>h1{
-  background-color: antiquewhite;
-  text-align: center;
+  min-height: 100vh;
 }
