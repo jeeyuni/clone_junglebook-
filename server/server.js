@@ -172,12 +172,19 @@ app.get('/api/users', async (req, res) => {
 // 예약 관련 API
 app.get('/api/reservations', async (req, res) => {
   try {
+    // 오늘 날짜의 예약만 조회
+    const today = new Date();
+    const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+    
     const [reservations] = await db.query(`
       SELECT r.*, u.user_name, u.display_name, u.profile_url 
       FROM reservations r 
       JOIN users u ON r.user_id = u.user_id 
-      ORDER BY r.slot_time DESC
-    `);
+      WHERE r.slot_time >= ? AND r.slot_time < ?
+      ORDER BY r.slot_time ASC
+    `, [startOfDay, endOfDay]);
+    
     res.json(reservations);
   } catch (error) {
     console.error('예약 목록 조회 오류:', error);
@@ -191,7 +198,73 @@ app.post('/api/reservations', async (req, res) => {
   }
 
   try {
+    console.log('예약 요청 받음:', req.body);
+    console.log('사용자 정보:', req.user);
+    
     const { slot_time } = req.body;
+    
+    if (!slot_time) {
+      return res.status(400).json({ error: 'slot_time이 필요합니다.' });
+    }
+    
+    // 사용자 ID 조회
+    const [users] = await db.query(
+      'SELECT user_id FROM users WHERE github_id = ?',
+      [req.user.github_id]
+    );
+
+    console.log('조회된 사용자:', users);
+
+    if (users.length === 0) {
+      return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    }
+
+    // 기존 예약 확인
+    const [existingReservations] = await db.query(
+      'SELECT * FROM reservations WHERE slot_time = ? AND slot_status = "reserved"',
+      [slot_time]
+    );
+
+    console.log('기존 예약:', existingReservations);
+
+    if (existingReservations.length > 0) {
+      return res.status(409).json({ error: '이미 예약된 시간입니다.' });
+    }
+
+    // MySQL DATETIME 형식으로 변환
+    const slotDateTime = new Date(slot_time);
+    const mysqlDateTime = slotDateTime.toISOString().slice(0, 19).replace('T', ' ');
+    
+    console.log('MySQL DATETIME 형식:', mysqlDateTime);
+    
+    // 예약 생성
+    const [result] = await db.query(
+      'INSERT INTO reservations (user_id, slot_time, slot_status) VALUES (?, ?, ?)',
+      [users[0].user_id, mysqlDateTime, 'reserved']
+    );
+
+    console.log('예약 생성 결과:', result);
+
+    res.json({ message: '예약이 완료되었습니다.' });
+  } catch (error) {
+    console.error('예약 생성 오류:', error);
+    console.error('에러 스택:', error.stack);
+    res.status(500).json({ 
+      error: '서버 오류가 발생했습니다.', 
+      details: error.message,
+      stack: error.stack 
+    });
+  }
+});
+
+// 예약 취소 API
+app.delete('/api/reservations/:slotTime', async (req, res) => {
+  if (!req.isAuthenticated()) {
+    return res.status(401).json({ error: '로그인이 필요합니다.' });
+  }
+
+  try {
+    const { slotTime } = req.params;
     
     // 사용자 ID 조회
     const [users] = await db.query(
@@ -203,15 +276,19 @@ app.post('/api/reservations', async (req, res) => {
       return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
     }
 
-    // 예약 생성
-    await db.query(
-      'INSERT INTO reservations (user_id, slot_time, slot_status) VALUES (?, ?, ?)',
-      [users[0].user_id, slot_time, 'reserved']
+    // 예약 취소 (상태를 cancelled로 변경)
+    const [result] = await db.query(
+      'UPDATE reservations SET slot_status = "cancelled" WHERE user_id = ? AND slot_time = ? AND slot_status = "reserved"',
+      [users[0].user_id, slotTime]
     );
 
-    res.json({ message: '예약이 완료되었습니다.' });
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: '예약을 찾을 수 없습니다.' });
+    }
+
+    res.json({ message: '예약이 취소되었습니다.' });
   } catch (error) {
-    console.error('예약 생성 오류:', error);
+    console.error('예약 취소 오류:', error);
     res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
 });

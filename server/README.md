@@ -57,7 +57,8 @@ npm install
 ### 4. 서버 실행
 
 ```bash
-node server.js
+cd server 
+start.bat
 ```
 
 서버는 `http://localhost:4000`에서 실행됩니다.

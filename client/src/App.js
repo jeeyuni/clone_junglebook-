@@ -76,13 +76,6 @@ const UserDescription = styled.p`
   margin: 0;
 `;
 
-const UserEmail = styled.p`
-  font-size: 12px;
-  color: #666;
-  margin: 0;
-  margin-top: 2px;
-`;
-
 const RoomHeader = styled.div`
   position: sticky;
   top: 0;
@@ -141,7 +134,7 @@ const TimeSlot = styled.div`
   align-items: center;
   justify-content: space-between;
   padding: 20px 24px;
-  opacity: ${props => props.isPast ? 0.4 : 1};
+  opacity: ${props => (props.isPast || props.isReserved) ? 0.4 : 1};
 `;
 
 const TimeInfo = styled.div`
@@ -200,25 +193,36 @@ const ReserveButton = styled.button`
   font-weight: 700;
   cursor: pointer;
   
-  ${props => props.isReserved ? `
-    background-color: #1a1a1a;
-    color: #666;
-    border: 1px solid #333;
-    cursor: not-allowed;
-  ` : props.isPast ? `
-    background-color: #1a1a1a;
-    color: #666;
-    border: 1px solid #333;
-    cursor: not-allowed;
-  ` : `
-    background-color: #10b981;
-    color: white;
-    border: none;
-    
-    &:hover {
-      background-color: #059669;
+  ${props => {
+    if (props.$isPast) {
+      return `
+        background-color: #1a1a1a;
+        color: #666;
+        border: 1px solid #333;
+        cursor: not-allowed;
+      `;
     }
-  `}
+    if (props.$isReserved) {
+      return `
+        background-color: #dc2626;
+        color: white;
+        border: none;
+        
+        &:hover {
+          background-color: #b91c1c;
+        }
+      `;
+    }
+    return `
+      background-color: #10b981;
+      color: white;
+      border: none;
+      
+      &:hover {
+        background-color: #059669;
+      }
+    `;
+  }}
 `;
 
 const LogoutButton = styled.button`
@@ -296,6 +300,7 @@ function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [user, setUser] = useState(null);
   const [notifications, setNotifications] = useState([]);
+  const [reservations, setReservations] = useState([]);
 
   // 로그인 상태 확인
   useEffect(() => {
@@ -347,11 +352,30 @@ function App() {
     }, 3000);
   };
 
+  // 예약 정보 가져오기
+  const fetchReservations = async () => {
+    try {
+      const response = await fetch('/api/reservations');
+      if (response.ok) {
+        const data = await response.json();
+        setReservations(data);
+      }
+    } catch (error) {
+      console.error('예약 정보 가져오기 실패:', error);
+    }
+  };
+
+  // 예약 정보 가져오기
+  useEffect(() => {
+    fetchReservations();
+  }, []);
+
   // 시간대 생성 (10시부터 24시까지)
   useEffect(() => {
     const slots = [];
     const now = new Date();
     const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
     
     // 10시부터 24시까지 (다음날 0시까지)
     for (let hour = 10; hour <= 24; hour++) {
@@ -365,8 +389,17 @@ function App() {
       const startTime = `${displayStartHour < 12 ? '오전' : '오후'} ${displayStartHour < 12 ? displayStartHour : displayStartHour - 12}:00`;
       const endTime = `${displayEndHour < 12 ? '오전' : '오후'} ${displayEndHour < 12 ? displayEndHour : displayEndHour - 12}:00`;
       
-      const isPast = hour < currentHour;
-      const isReserved = hour === 13; // 오후 1시-2시는 예약됨으로 설정
+      // 현재 시간과 비교하여 과거 시간인지 확인
+      const isPast = hour < currentHour || (hour === currentHour && currentMinute >= 0);
+      
+      // 해당 시간대의 예약 확인
+      const reservation = reservations.find(res => {
+        const resTime = new Date(res.slot_time);
+        return resTime.getHours() === hour && resTime.getDate() === now.getDate() && res.slot_status === 'reserved';
+      });
+      
+      const isReserved = !!reservation;
+      const reservedBy = reservation ? reservation.display_name : null;
       
       slots.push({
         id: hour,
@@ -375,20 +408,80 @@ function App() {
         endTime,
         isPast,
         isReserved,
-        reservedBy: isReserved ? '한진우' : null
+        reservedBy
       });
     }
     setTimeSlots(slots);
-  }, []);
+  }, [reservations]);
 
-  const handleReserve = (slotId) => {
+  const handleReserve = async (slotId) => {
     if (!isLoggedIn) {
       addNotification('권한이 없습니다.');
       return;
     }
     
-    console.log(`예약 요청: ${slotId}번 시간대`);
-    // 여기에 예약 로직 추가
+    const slot = timeSlots.find(s => s.id === slotId);
+    if (!slot) return;
+
+    try {
+      // 현재 날짜와 시간을 결합하여 slot_time 생성
+      const now = new Date();
+      const slotDateTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), slotId, 0, 0);
+      
+      if (slot.isReserved && slot.reservedBy === user.displayName) {
+        // 내가 예약한 시간이면 취소
+        const response = await fetch(`/api/reservations/${encodeURIComponent(slotDateTime.toISOString())}`, {
+          method: 'DELETE',
+          credentials: 'include'
+        });
+        
+        if (response.ok) {
+          // 즉시 로컬 상태 업데이트
+          setTimeSlots(prevSlots => 
+            prevSlots.map(s => 
+              s.id === slotId 
+                ? { ...s, isReserved: false, reservedBy: null }
+                : s
+            )
+          );
+          addNotification('예약이 취소되었습니다.');
+        } else {
+          const error = await response.json();
+          addNotification(error.error || '예약 취소에 실패했습니다.');
+        }
+      } else if (!slot.isReserved) {
+        // 예약 가능한 시간이면 예약
+        console.log('예약 요청 데이터:', { slot_time: slotDateTime.toISOString() });
+        const response = await fetch('/api/reservations', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          credentials: 'include',
+          body: JSON.stringify({ slot_time: slotDateTime.toISOString() })
+        });
+        
+        if (response.ok) {
+          // 즉시 로컬 상태 업데이트
+          setTimeSlots(prevSlots => 
+            prevSlots.map(s => 
+              s.id === slotId 
+                ? { ...s, isReserved: true, reservedBy: user.displayName }
+                : s
+            )
+          );
+          addNotification('예약이 완료되었습니다.');
+        } else {
+          const error = await response.json();
+          addNotification(error.error || '예약에 실패했습니다.');
+        }
+      } else {
+        addNotification('다른 사용자가 예약한 시간입니다.');
+      }
+    } catch (error) {
+      console.error('예약 처리 오류:', error);
+      addNotification('예약 처리 중 오류가 발생했습니다.');
+    }
   };
 
   const formatDate = (date) => {
@@ -467,11 +560,11 @@ function App() {
               </TimeInfo>
               <ReserveButton 
                 onClick={() => handleReserve(slot.id)}
-                disabled={slot.isPast || slot.isReserved}
-                isPast={slot.isPast}
-                isReserved={slot.isReserved}
+                disabled={slot.isPast || (slot.isReserved && slot.reservedBy !== user?.displayName)}
+                $isPast={slot.isPast}
+                $isReserved={slot.isReserved}
               >
-                예약
+                {slot.isReserved && slot.reservedBy === user?.displayName ? '취소' : '예약'}
               </ReserveButton>
             </TimeSlot>
           ))}
