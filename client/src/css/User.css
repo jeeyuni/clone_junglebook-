@@ -1,0 +1,27 @@
+
+.user{
+  width:150px;
+  height : 120px;
+  background-color: aquamarine;
+  margin: 5px auto;
+}
+
+.user>div{
+    height: 25%;
+}
+
+.user>div:first-child{
+    background-color: blanchedalmond;
+}
+
+.user>div:nth-child(2){
+    background-color: cadetblue;
+}
+
+.user>div:nth-child(3){
+    background-color: chartreuse;
+}
+
+.user>div:nth-child(4){
+    background-color: chocolate;
+}

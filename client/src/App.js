@@ -1,6 +1,7 @@
 import './App.css';
 import axios from 'axios';
 import { useState } from 'react';
+import User from './components/User';
 
 function App() {
   const [personList, setPersonList] = useState([])
@@ -18,16 +19,13 @@ function App() {
     //백엔드서버에 요청전송하기 - axios
   }
   const result = personList.map(
-    data => (<div key = {data.no} className='person'>
-      <div>아이디: {data.person_id}</div>
-      <div>이름: {data.person_name}</div>
-      <div>나이: {data.age}</div>
-      <div>생일: {data.birthday}</div>
-    </div>)
+    data => (< User person_id = {data.person_id} person_name = {data.person_name} 
+                age = {data.age} birthday = {data.birthday}/>)
   )
 
   return (
     <div className="App">
+      <h1>사람 목록</h1>
       <button onClick = {getPersonData}> 클릭</button>
       {result}
     </div>

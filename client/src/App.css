@@ -1,7 +1,11 @@
-
-.person{
-  width:100px;
-  height : 150px;
+.App{
+  width: 1200px;
+  height: 700px;
   background-color: aqua;
-  margin: 5px auto;
+  margin: 0 auto;
+}
+
+.App>h1{
+  background-color: antiquewhite;
+  text-align: center;
 }
